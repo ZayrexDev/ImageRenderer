@@ -1,11 +1,17 @@
 package xyz.zcraft.image;
 
-import com.microsoft.playwright.*;
+import com.microsoft.playwright.BrowserContext;
+import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.options.LoadState;
+
 import java.util.concurrent.*;
 import java.util.function.Consumer;
 
-/** Thread-confined browser workers. Call screenshot only from executor(), or use render(). */
+/**
+ * Thread-confined browser workers. Call screenshot only from executor(), or use render().
+ */
 public final class HtmlRenderer implements AutoCloseable {
     private final ThreadLocal<Boolean> owned = new ThreadLocal<>();
     private final ThreadLocal<Playwright> playwright = new ThreadLocal<>();
@@ -21,20 +27,20 @@ public final class HtmlRenderer implements AutoCloseable {
         this.setup = java.util.Objects.requireNonNull(setup);
         this.timeoutMillis = timeoutMillis;
         executor = new ThreadPoolExecutor(workers, workers, 0, TimeUnit.MILLISECONDS,
-            new ArrayBlockingQueue<>(queueCapacity), task -> Thread.ofPlatform().name("image-renderer").unstarted(() -> {
-                try {
-                    owned.set(true);
-                    task.run();
-                } finally {
-                    Playwright instance = playwright.get();
-                    if (instance != null) {
-                        instance.close();
-                    }
-                    playwright.remove();
-                    contexts.remove();
-                    owned.remove();
+                new ArrayBlockingQueue<>(queueCapacity), task -> Thread.ofPlatform().name("image-renderer").unstarted(() -> {
+            try {
+                owned.set(true);
+                task.run();
+            } finally {
+                Playwright instance = playwright.get();
+                if (instance != null) {
+                    instance.close();
                 }
-            }), new ThreadPoolExecutor.AbortPolicy());
+                playwright.remove();
+                contexts.remove();
+                owned.remove();
+            }
+        }), new ThreadPoolExecutor.AbortPolicy());
     }
 
     public ExecutorService executor() {
