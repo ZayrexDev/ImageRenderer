@@ -8,6 +8,7 @@ import com.microsoft.playwright.options.LoadState;
 
 import java.util.concurrent.*;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Thread-confined browser workers. Call screenshot only from executor(), or use render().
@@ -49,6 +50,54 @@ public final class HtmlRenderer implements AutoCloseable {
 
     public CompletableFuture<byte[]> render(String html) {
         return CompletableFuture.supplyAsync(() -> screenshot(html), executor);
+    }
+
+    public <T> CompletableFuture<T> renderPage(String html, Function<Page, T> renderer) {
+        return CompletableFuture.supplyAsync(
+                () -> withPage(html, renderer),
+                executor
+        );
+    }
+
+    private <T> T withPage(String html, Function<Page, T> renderer) {
+        if (!Boolean.TRUE.equals(owned.get())) {
+            throw new IllegalStateException(
+                    "Use the renderer executor"
+            );
+        }
+
+        BrowserContext context = contexts.get();
+
+        if (context == null) {
+            Playwright instance = Playwright.create();
+
+            try {
+                context = instance.chromium()
+                        .launch(new BrowserType.LaunchOptions().setHeadless(true))
+                        .newContext();
+
+                context.setDefaultTimeout(timeoutMillis);
+                setup.accept(context);
+
+                playwright.set(instance);
+                contexts.set(context);
+            } catch (RuntimeException e) {
+                instance.close();
+                throw e;
+            }
+        }
+
+        try (Page page = context.newPage()) {
+            page.setContent(html);
+            page.waitForLoadState(LoadState.NETWORKIDLE);
+            page.waitForFunction("""
+                    () => document.fonts.status === 'loaded'
+                        && Array.from(document.images)
+                            .every(i => i.complete)
+                    """);
+
+            return renderer.apply(page);
+        }
     }
 
     public byte[] screenshot(String html) {
